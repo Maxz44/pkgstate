@@ -1,0 +1,6 @@
+{
+    "update": "sudo pacman -Syu",
+    "install": "sudo pacman -S <pkgs>",
+    "remove": "sudo pacman -Rcs <pkgs>",
+    "installed": "pacman -Q <pkg>"
+}
