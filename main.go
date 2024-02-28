@@ -8,8 +8,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 )
+
+const newline = "\n"
+const appname = "pkgstate"
 
 type Pkg_config struct {
 	Update    string
@@ -41,7 +45,7 @@ func pkg_conf_exists(pkg_manager string) bool {
 		panic(err)
 	}
 
-	path := filepath.Join(userConfigDir, "pkgstate", "pkgs_config", pkg_manager+".json")
+	path := filepath.Join(userConfigDir, appname, "pkgs_config", pkg_manager+".json")
 	_, err = os.Stat(path)
 	if err == nil {
 		return true
@@ -88,7 +92,7 @@ func get_config_path() string {
 		panic(err)
 	}
 
-	config_path := filepath.Join(userConfigDir, "pkgstate", "pkgs.ini")
+	config_path := filepath.Join(userConfigDir, appname, "pkgs.ini")
 	_, err = os.Stat(config_path)
 	if err != nil {
 		config_path = filepath.Join(".", "pkgs.ini")
@@ -111,7 +115,7 @@ func get_pkg_config(pkg_manager string) Pkg_config {
 		panic(err)
 	}
 
-	config_path := filepath.Join(userConfigDir, "pkgstate", pkg_manager+".json")
+	config_path := filepath.Join(userConfigDir, appname, pkg_manager+".json")
 	_, err = os.Stat(config_path)
 	if err != nil {
 		config_path = filepath.Join("./", pkg_manager+".json")
@@ -144,6 +148,58 @@ func pkgs_install(pkgs []string, pkg_config Pkg_config) {
 	}
 }
 
+func pkgs_remove(pkgs []string, pkg_config Pkg_config) {
+	cmd := strings.ReplaceAll(pkg_config.Remove, "<pkgs>", strings.Join(pkgs, " "))
+	err := run_cmd(cmd)
+	if err != nil {
+		if len(pkgs) > 1 {
+			for _, pkg := range pkgs {
+				pkgs_remove([]string{pkg}, pkg_config)
+			}
+		}
+	}
+}
+
+func get_state_path(pkg_manager string) string {
+	userCacheDir, err := os.UserCacheDir()
+	if err != nil {
+		panic(err)
+	}
+	path := filepath.Join(userCacheDir, appname)
+	err = os.MkdirAll(path, 0750)
+	if err != nil {
+		panic(err)
+	}
+	state_file_path := filepath.Join(path, pkg_manager+".state")
+	return state_file_path
+}
+
+func get_state(pkg_manager string) []string {
+	state_path := get_state_path(pkg_manager)
+	_, err := os.Stat(state_path)
+	if err != nil {
+		_, err = os.Create(state_path)
+		if err != nil {
+			panic(err)
+		}
+	}
+	rslt, err := os.ReadFile(state_path)
+	if err != nil {
+		panic(err)
+	}
+	return strings.Split(string(rslt), newline)
+}
+
+func save_state(pkg_manager string, pkgs []string) {
+	data := strings.Join(pkgs, newline)
+	state_file, err := os.Create(get_state_path(pkg_manager))
+	if err != nil {
+		panic(err)
+	}
+	defer state_file.Close()
+	state_file.WriteString(data)
+}
+
 func sync_pkgs(pkg_manager string, pkgs []string) {
 	pkg_config := get_pkg_config(pkg_manager)
 
@@ -158,6 +214,22 @@ func sync_pkgs(pkg_manager string, pkgs []string) {
 		pkgs_install(pkgs_to_install, pkg_config)
 	}
 
+	state := get_state(pkg_manager)
+	var to_remove []string
+	if len(state) > 0 {
+		to_remove = state[:0]
+		for _, pkg := range state {
+			if !slices.Contains(pkgs, pkg) {
+				to_remove = append(to_remove, pkg)
+			}
+		}
+	}
+	if len(pkgs) > 0 {
+		save_state(pkg_manager, pkgs)
+	}
+	if len(to_remove) > 0 {
+		pkgs_remove(to_remove, pkg_config)
+	}
 }
 
 func main() {
